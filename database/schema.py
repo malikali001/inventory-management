@@ -59,11 +59,52 @@ CREATE TABLE IF NOT EXISTS sale_items (
     price_per_unit REAL    NOT NULL,
     quantity_base  REAL    NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS saved_units (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL UNIQUE,
+    default_count REAL NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS saved_categories (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE
+);
 """
+
+_DEFAULT_UNITS = [
+    ("piece", 1), ("unit", 1), ("pair", 2), ("set", 1),
+    ("dozen", 12), ("half dozen", 6), ("bundle", 6),
+    ("box", 24), ("carton", 48), ("case", 12),
+    ("pack", 10), ("packet", 1), ("bag", 1),
+    ("pallet", 1), ("crate", 1),
+    ("kg", 1), ("gram", 1), ("lb", 1), ("oz", 1),
+    ("litre", 1), ("ml", 1), ("gallon", 1),
+    ("meter", 1), ("foot", 1), ("inch", 1), ("yard", 1),
+    ("roll", 1), ("sheet", 1), ("bottle", 1), ("can", 1),
+]
+
+_DEFAULT_CATEGORIES = [
+    "Food", "Beverages", "Household", "Electronics",
+    "Clothing", "Health & Beauty", "Stationery",
+    "Hardware", "Grocery", "Other",
+]
 
 
 def init_db() -> None:
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist and seed defaults."""
     conn = get_connection()
     conn.executescript(SCHEMA_SQL)
+    # Seed default units
+    for name, count in _DEFAULT_UNITS:
+        conn.execute(
+            "INSERT OR IGNORE INTO saved_units (name, default_count) VALUES (?, ?)",
+            (name, count),
+        )
+    # Seed default categories
+    for name in _DEFAULT_CATEGORIES:
+        conn.execute(
+            "INSERT OR IGNORE INTO saved_categories (name) VALUES (?)",
+            (name,),
+        )
     conn.commit()

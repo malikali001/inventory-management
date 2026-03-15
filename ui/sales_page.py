@@ -133,7 +133,10 @@ class SalesPage(QWidget):
         self.history_table.setRowCount(len(sales))
         for row, s in enumerate(sales):
             self.history_table.setItem(row, 0, QTableWidgetItem(s.date))
-            self.history_table.setItem(row, 1, QTableWidgetItem(str(len(s.items))))
+            items_text = ", ".join(
+                f"{it.product_name} ({it.quantity:g} {it.unit_name})" for it in s.items
+            )
+            self.history_table.setItem(row, 1, QTableWidgetItem(items_text))
             self.history_table.setItem(row, 2, QTableWidgetItem(f"{s.total:,.0f}"))
             self.history_table.setItem(row, 3, QTableWidgetItem(s.notes))
 
@@ -220,7 +223,7 @@ class SalesPage(QWidget):
             return
         for u in product.units:
             unit_combo.addItem(u.unit_name, u.id)
-            if u.is_default_sale:
+            if u.conversion_to_base == 1:
                 unit_combo.setCurrentIndex(unit_combo.count() - 1)
 
     def _remove_row(self, row: int):

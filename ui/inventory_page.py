@@ -88,7 +88,7 @@ class InventoryPage(QWidget):
         for row, d in enumerate(data):
             name_item = QTableWidgetItem(d["name"])
             cat_item = QTableWidgetItem(d["category"] or "")
-            qty_item = QTableWidgetItem(f"{d['display_qty']:,.0f}")
+            qty_item = QTableWidgetItem(f"{d['display_qty']:,.2f}")
             qty_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             unit_item = QTableWidgetItem(d["display_unit"])
             status_item = QTableWidgetItem(

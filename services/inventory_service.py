@@ -14,7 +14,7 @@ def get_inventory_summary() -> List[Dict]:
                pu.conversion_to_base AS display_conversion
         FROM products p
         LEFT JOIN inventory i ON i.product_id = p.id
-        LEFT JOIN product_units pu ON pu.product_id = p.id AND pu.is_default_sale = 1
+        LEFT JOIN product_units pu ON pu.product_id = p.id AND pu.conversion_to_base = 1
         WHERE p.is_active = 1
         ORDER BY p.name
     """).fetchall()

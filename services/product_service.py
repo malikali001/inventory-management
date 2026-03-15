@@ -71,17 +71,17 @@ def get_units_for_product(product_id: int) -> List[ProductUnit]:
 # Format: { base_unit: [(unit_name, conversion_to_base), ...] }
 SUGGESTED_UNITS = {
     "piece": [
-        ("dozen (12 pcs)", 12),
-        ("half dozen (6 pcs)", 6),
-        ("pair (2 pcs)", 2),
+        ("dozen", 12),
+        ("half dozen", 6),
+        ("pair", 2),
         ("box", 24),
         ("pack", 10),
         ("carton", 48),
     ],
     "unit": [
-        ("dozen (12 units)", 12),
-        ("half dozen (6 units)", 6),
-        ("pair (2 units)", 2),
+        ("dozen", 12),
+        ("half dozen", 6),
+        ("pair", 2),
         ("box", 24),
         ("pack", 10),
     ],
@@ -127,16 +127,8 @@ def create_product(
     category: str,
     base_unit: str,
     low_stock_threshold: float,
-    purchase_unit: str = None,
-    purchase_conversion: float = None,
-    sale_unit: str = None,
-    sale_conversion: float = None,
 ) -> int:
-    """Create a product with base unit and optional purchase/sale unit defaults.
-
-    If purchase_unit or sale_unit differ from base_unit, separate unit entries
-    are created with the appropriate default flags.
-    """
+    """Create a product with its base unit entry and inventory row."""
     conn = get_connection()
     base = base_unit.strip()
     cur = conn.execute(
@@ -144,47 +136,13 @@ def create_product(
         (name.strip(), category.strip(), base, low_stock_threshold),
     )
     product_id = cur.lastrowid
-
-    # Determine default flags for the base unit entry
-    base_is_purchase = (purchase_unit is None or purchase_unit.strip().lower() == base.lower())
-    base_is_sale = (sale_unit is None or sale_unit.strip().lower() == base.lower())
-
+    # Base unit entry (1:1 conversion)
     conn.execute(
         """INSERT INTO product_units (product_id, unit_name, conversion_to_base,
            is_default_purchase, is_default_sale)
-           VALUES (?,?,1,?,?)""",
-        (product_id, base, int(base_is_purchase), int(base_is_sale)),
+           VALUES (?,?,1,1,1)""",
+        (product_id, base),
     )
-
-    # Create separate purchase unit if different from base
-    if purchase_unit and purchase_unit.strip().lower() != base.lower():
-        conn.execute(
-            """INSERT INTO product_units (product_id, unit_name, conversion_to_base,
-               is_default_purchase, is_default_sale)
-               VALUES (?,?,?,1,0)""",
-            (product_id, purchase_unit.strip(), purchase_conversion or 1),
-        )
-
-    # Create separate sale unit if different from base (and not same as purchase unit)
-    if sale_unit and sale_unit.strip().lower() != base.lower():
-        is_same_as_purchase = (
-            purchase_unit and sale_unit.strip().lower() == purchase_unit.strip().lower()
-        )
-        if is_same_as_purchase:
-            # Update the already-inserted purchase unit to also be default sale
-            conn.execute(
-                """UPDATE product_units SET is_default_sale=1
-                   WHERE product_id=? AND unit_name=?""",
-                (product_id, sale_unit.strip()),
-            )
-        else:
-            conn.execute(
-                """INSERT INTO product_units (product_id, unit_name, conversion_to_base,
-                   is_default_purchase, is_default_sale)
-                   VALUES (?,?,?,0,1)""",
-                (product_id, sale_unit.strip(), sale_conversion or 1),
-            )
-
     # Ensure an inventory row exists
     conn.execute(
         "INSERT OR IGNORE INTO inventory (product_id, quantity_base) VALUES (?,0)",

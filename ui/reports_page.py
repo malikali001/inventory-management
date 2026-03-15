@@ -287,7 +287,7 @@ class ReportsPage(QWidget):
         self.purchase_hist_table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             self.purchase_hist_table.setItem(i, 0, QTableWidgetItem(r["date"]))
-            self.purchase_hist_table.setItem(i, 1, QTableWidgetItem(str(r["item_count"])))
+            self.purchase_hist_table.setItem(i, 1, QTableWidgetItem(r.get("items_text", str(r["item_count"]))))
             total_item = QTableWidgetItem(f"{r['total']:,.0f}")
             total_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.purchase_hist_table.setItem(i, 2, total_item)

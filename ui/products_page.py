@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QDialog, QFormLayout,
     QLineEdit, QDoubleSpinBox, QMessageBox, QHeaderView,
-    QCheckBox, QFrame, QScrollArea, QStyle, QComboBox,
+    QFrame, QStyle,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -10,42 +10,12 @@ from PySide6.QtGui import QColor
 from services.product_service import (
     get_all_products, create_product, update_product,
     deactivate_product, reactivate_product, delete_product,
-    get_units_for_product, add_unit, delete_unit, update_unit,
+    get_units_for_product, add_unit, delete_unit,
     SUGGESTED_UNITS,
 )
 from models.product import Product, ProductUnit
 from ui.styles import COLORS
-
-# Common units used in retail / wholesale markets
-COMMON_BASE_UNITS = [
-    "",
-    # Count
-    "piece", "unit", "pair", "set",
-    # Weight
-    "kg", "gram", "lb", "oz",
-    # Volume
-    "litre", "ml", "gallon",
-    # Length
-    "meter", "foot", "inch", "yard",
-    # Packaging
-    "bottle", "can", "bag", "roll", "sheet",
-]
-
-COMMON_EXTRA_UNITS = [
-    "",
-    # Count / grouping
-    "piece", "unit", "dozen (12 pcs)", "half dozen (6 pcs)",
-    "pair (2 pcs)", "set", "bundle",
-    # Packaging / wholesale
-    "box", "carton", "case", "pack", "packet",
-    "bag", "pallet", "crate",
-    # Weight
-    "kg", "gram", "lb", "oz",
-    # Volume
-    "litre", "ml", "gallon",
-    # Length / area
-    "meter", "foot", "yard", "roll", "sheet", "ream",
-]
+from ui.dialogs.picker_dialog import ItemPickerDialog
 
 
 class ProductsPage(QWidget):
@@ -149,13 +119,7 @@ class ProductsPage(QWidget):
         dlg = ProductDialog(self)
         if dlg.exec() == QDialog.Accepted:
             d = dlg.get_data()
-            create_product(
-                d["name"], d["category"], d["base_unit"], d["threshold"],
-                purchase_unit=d.get("purchase_unit"),
-                purchase_conversion=d.get("purchase_conversion"),
-                sale_unit=d.get("sale_unit"),
-                sale_conversion=d.get("sale_conversion"),
-            )
+            create_product(d["name"], d["category"], d["base_unit"], d["threshold"])
             self.refresh()
 
     def _edit_product(self, product: Product):
@@ -163,44 +127,7 @@ class ProductsPage(QWidget):
         if dlg.exec() == QDialog.Accepted:
             d = dlg.get_data()
             update_product(product.id, d["name"], d["category"], d["base_unit"], d["threshold"])
-            # Update purchase/sale unit defaults if changed
-            self._sync_unit_defaults(product, d)
             self.refresh()
-
-    def _sync_unit_defaults(self, product: Product, data: dict):
-        """Sync purchase/sale default units after product edit."""
-        base = data["base_unit"]
-        pu_name = data.get("purchase_unit")  # None means base unit
-        su_name = data.get("sale_unit")      # None means base unit
-        pu_conv = data.get("purchase_conversion") or 1
-        su_conv = data.get("sale_conversion") or 1
-
-        units = get_units_for_product(product.id)
-        existing_by_name = {u.unit_name.lower(): u for u in units}
-
-        # Determine desired purchase default
-        desired_purchase = pu_name or base
-        desired_sale = su_name or base
-
-        # Handle purchase unit
-        if desired_purchase.lower() in existing_by_name:
-            u = existing_by_name[desired_purchase.lower()]
-            if not u.is_default_purchase:
-                update_unit(u.id, u.unit_name, u.conversion_to_base, True, u.is_default_sale)
-        elif pu_name:
-            add_unit(product.id, pu_name, pu_conv, is_default_purchase=True)
-
-        # Refresh units after purchase change
-        units = get_units_for_product(product.id)
-        existing_by_name = {u.unit_name.lower(): u for u in units}
-
-        # Handle sale unit
-        if desired_sale.lower() in existing_by_name:
-            u = existing_by_name[desired_sale.lower()]
-            if not u.is_default_sale:
-                update_unit(u.id, u.unit_name, u.conversion_to_base, u.is_default_purchase, True)
-        elif su_name:
-            add_unit(product.id, su_name, su_conv, is_default_sale=True)
 
     def _remove_product(self, product_id: int, product_name: str):
         """Two-step removal: first ask Disable or Delete, then confirm if Delete."""
@@ -276,9 +203,8 @@ class RemoveProductDialog(QDialog):
 class ProductDialog(QDialog):
     def __init__(self, parent=None, product: Product = None):
         super().__init__(parent)
-        self._product = product
         self.setWindowTitle("Add Product" if not product else "Edit Product")
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(400)
         layout = QFormLayout(self)
         layout.setSpacing(12)
 
@@ -286,16 +212,31 @@ class ProductDialog(QDialog):
         self.name_edit.setPlaceholderText("e.g. Soap, Rice, Oil")
         layout.addRow("Product Name *", self.name_edit)
 
+        # Category field with picker button
+        cat_row = QHBoxLayout()
         self.category_edit = QLineEdit()
-        self.category_edit.setPlaceholderText("e.g. Household, Food")
-        layout.addRow("Category", self.category_edit)
+        self.category_edit.setPlaceholderText("Click browse to select")
+        self.category_edit.setReadOnly(True)
+        cat_row.addWidget(self.category_edit)
+        btn_cat = QPushButton("...")
+        btn_cat.setFixedWidth(36)
+        btn_cat.setToolTip("Select category")
+        btn_cat.clicked.connect(self._pick_category)
+        cat_row.addWidget(btn_cat)
+        layout.addRow("Category", cat_row)
 
-        self.base_unit_edit = QComboBox()
-        self.base_unit_edit.setEditable(True)
-        self.base_unit_edit.addItems(COMMON_BASE_UNITS)
-        self.base_unit_edit.setCurrentText("")
-        self.base_unit_edit.lineEdit().setPlaceholderText("e.g. piece, kg, litre")
-        layout.addRow("Base Unit *", self.base_unit_edit)
+        # Base unit field with picker button
+        unit_row = QHBoxLayout()
+        self.base_unit_edit = QLineEdit()
+        self.base_unit_edit.setPlaceholderText("Click browse to select")
+        self.base_unit_edit.setReadOnly(True)
+        unit_row.addWidget(self.base_unit_edit)
+        btn_unit = QPushButton("...")
+        btn_unit.setFixedWidth(36)
+        btn_unit.setToolTip("Select unit")
+        btn_unit.clicked.connect(self._pick_unit)
+        unit_row.addWidget(btn_unit)
+        layout.addRow("Base Unit *", unit_row)
 
         self.threshold_spin = QDoubleSpinBox()
         self.threshold_spin.setRange(0, 999999)
@@ -303,82 +244,11 @@ class ProductDialog(QDialog):
         self.threshold_spin.setToolTip("Warn when stock (in base units) falls to or below this")
         layout.addRow("Low Stock Alert (base units)", self.threshold_spin)
 
-        # ── Unit Setup section ──
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setFrameShadow(QFrame.Sunken)
-        layout.addRow(sep)
-
-        unit_header = QLabel("Unit Setup")
-        unit_header.setStyleSheet("font-weight: bold; font-size: 13px;")
-        layout.addRow(unit_header)
-
-        # Purchase unit row: combo + conversion spin
-        purchase_row = QHBoxLayout()
-        self.purchase_unit_combo = QComboBox()
-        self.purchase_unit_combo.setEditable(True)
-        self.purchase_unit_combo.lineEdit().setPlaceholderText("same as base unit")
-        self.purchase_unit_combo.setMinimumWidth(140)
-        purchase_row.addWidget(self.purchase_unit_combo)
-        purchase_row.addWidget(QLabel("1 unit ="))
-        self.purchase_conversion = QDoubleSpinBox()
-        self.purchase_conversion.setRange(0.001, 999999)
-        self.purchase_conversion.setDecimals(3)
-        self.purchase_conversion.setValue(1)
-        self.purchase_conversion.setEnabled(False)
-        purchase_row.addWidget(self.purchase_conversion)
-        self.purchase_base_label = QLabel("base unit(s)")
-        purchase_row.addWidget(self.purchase_base_label)
-        layout.addRow("Purchase Unit", purchase_row)
-
-        # Sale unit row: combo + conversion spin
-        sale_row = QHBoxLayout()
-        self.sale_unit_combo = QComboBox()
-        self.sale_unit_combo.setEditable(True)
-        self.sale_unit_combo.lineEdit().setPlaceholderText("same as base unit")
-        self.sale_unit_combo.setMinimumWidth(140)
-        sale_row.addWidget(self.sale_unit_combo)
-        sale_row.addWidget(QLabel("1 unit ="))
-        self.sale_conversion = QDoubleSpinBox()
-        self.sale_conversion.setRange(0.001, 999999)
-        self.sale_conversion.setDecimals(3)
-        self.sale_conversion.setValue(1)
-        self.sale_conversion.setEnabled(False)
-        sale_row.addWidget(self.sale_conversion)
-        self.sale_base_label = QLabel("base unit(s)")
-        sale_row.addWidget(self.sale_base_label)
-        layout.addRow("Sale Unit", sale_row)
-
-        # Manage Units button (for adding more units beyond purchase/sale defaults)
-        if product:
-            btn_manage = QPushButton("Manage Units...")
-            btn_manage.setObjectName("btn_secondary")
-            btn_manage.setToolTip("Add more units or change defaults")
-            btn_manage.clicked.connect(self._open_units_dialog)
-            layout.addRow("", btn_manage)
-
-        # Connect signals
-        self.base_unit_edit.currentTextChanged.connect(self._on_base_unit_changed)
-        self.purchase_unit_combo.currentTextChanged.connect(self._on_purchase_unit_changed)
-        self.sale_unit_combo.currentTextChanged.connect(self._on_sale_unit_changed)
-
-        # Populate with existing data
         if product:
             self.name_edit.setText(product.name)
             self.category_edit.setText(product.category)
-            self.base_unit_edit.setCurrentText(product.base_unit)
+            self.base_unit_edit.setText(product.base_unit)
             self.threshold_spin.setValue(product.low_stock_threshold)
-            self._populate_unit_combos(product.base_unit)
-            # Pre-select current default purchase/sale units
-            for u in product.units:
-                if u.is_default_purchase:
-                    self.purchase_unit_combo.setCurrentText(u.unit_name)
-                    self.purchase_conversion.setValue(u.conversion_to_base)
-                if u.is_default_sale:
-                    self.sale_unit_combo.setCurrentText(u.unit_name)
-                    self.sale_conversion.setValue(u.conversion_to_base)
-        else:
-            self._populate_unit_combos("")
 
         btns = QHBoxLayout()
         btn_ok = QPushButton("Save")
@@ -391,91 +261,35 @@ class ProductDialog(QDialog):
         btns.addWidget(btn_ok)
         layout.addRow(btns)
 
-    def _populate_unit_combos(self, base_unit: str):
-        """Populate purchase/sale unit combos with base unit + suggestions."""
-        base = base_unit.strip()
-        suggestions = SUGGESTED_UNITS.get(base.lower(), [])
+    def _pick_category(self):
+        dlg = ItemPickerDialog(self, mode="category")
+        if dlg.exec() == QDialog.Accepted:
+            name, _ = dlg.get_selected()
+            if name:
+                self.category_edit.setText(name)
 
-        for combo in (self.purchase_unit_combo, self.sale_unit_combo):
-            prev = combo.currentText()
-            combo.blockSignals(True)
-            combo.clear()
-            # First item: the base unit itself (means "same as base")
-            if base:
-                combo.addItem(base)
-            # Add suggested units
-            for name, _conv in suggestions:
-                combo.addItem(name)
-            combo.setCurrentText(prev if prev else base)
-            combo.blockSignals(False)
-
-        # Update labels
-        label_text = f"{base}(s)" if base else "base unit(s)"
-        self.purchase_base_label.setText(label_text)
-        self.sale_base_label.setText(label_text)
-
-    def _on_base_unit_changed(self, text: str):
-        self._populate_unit_combos(text)
-        # Reset to base unit
-        base = text.strip()
-        self.purchase_unit_combo.setCurrentText(base)
-        self.sale_unit_combo.setCurrentText(base)
-
-    def _on_purchase_unit_changed(self, text: str):
-        base = self.base_unit_edit.currentText().strip()
-        is_base = (text.strip().lower() == base.lower()) or not text.strip()
-        self.purchase_conversion.setEnabled(not is_base)
-        if is_base:
-            self.purchase_conversion.setValue(1)
-        else:
-            # Auto-fill conversion from suggestions if available
-            for name, conv in SUGGESTED_UNITS.get(base.lower(), []):
-                if name.lower() == text.strip().lower():
-                    self.purchase_conversion.setValue(conv)
-                    break
-
-    def _on_sale_unit_changed(self, text: str):
-        base = self.base_unit_edit.currentText().strip()
-        is_base = (text.strip().lower() == base.lower()) or not text.strip()
-        self.sale_conversion.setEnabled(not is_base)
-        if is_base:
-            self.sale_conversion.setValue(1)
-        else:
-            for name, conv in SUGGESTED_UNITS.get(base.lower(), []):
-                if name.lower() == text.strip().lower():
-                    self.sale_conversion.setValue(conv)
-                    break
-
-    def _open_units_dialog(self):
-        if self._product:
-            from services.product_service import get_product_by_id
-            product = get_product_by_id(self._product.id)
-            if product:
-                dlg = UnitsDialog(self, product)
-                dlg.exec()
+    def _pick_unit(self):
+        dlg = ItemPickerDialog(self, mode="unit")
+        if dlg.exec() == QDialog.Accepted:
+            name, _ = dlg.get_selected()
+            if name:
+                self.base_unit_edit.setText(name)
 
     def _validate_and_accept(self):
         if not self.name_edit.text().strip():
             QMessageBox.warning(self, "Validation", "Product name is required.")
             return
-        if not self.base_unit_edit.currentText().strip():
+        if not self.base_unit_edit.text().strip():
             QMessageBox.warning(self, "Validation", "Base unit is required.")
             return
         self.accept()
 
     def get_data(self) -> dict:
-        base = self.base_unit_edit.currentText().strip()
-        pu = self.purchase_unit_combo.currentText().strip()
-        su = self.sale_unit_combo.currentText().strip()
         return {
             "name": self.name_edit.text().strip(),
             "category": self.category_edit.text().strip(),
-            "base_unit": base,
+            "base_unit": self.base_unit_edit.text().strip(),
             "threshold": self.threshold_spin.value(),
-            "purchase_unit": pu if pu and pu.lower() != base.lower() else None,
-            "purchase_conversion": self.purchase_conversion.value() if pu and pu.lower() != base.lower() else None,
-            "sale_unit": su if su and su.lower() != base.lower() else None,
-            "sale_conversion": self.sale_conversion.value() if su and su.lower() != base.lower() else None,
         }
 
 
@@ -484,7 +298,7 @@ class UnitsDialog(QDialog):
         super().__init__(parent)
         self.product = product
         self.setWindowTitle(f"Units — {product.name}")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(480)
         self.setMinimumHeight(400)
 
         layout = QVBoxLayout(self)
@@ -499,9 +313,9 @@ class UnitsDialog(QDialog):
 
         # Units table
         self.units_table = QTableWidget()
-        self.units_table.setColumnCount(5)
+        self.units_table.setColumnCount(3)
         self.units_table.setHorizontalHeaderLabels(
-            ["Unit Name", "= N base units", "Default Purchase", "Default Sale", ""]
+            ["Unit Name", f"= N {product.base_unit}(s)", ""]
         )
         self.units_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.units_table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -518,23 +332,24 @@ class UnitsDialog(QDialog):
         add_label.setStyleSheet("font-weight: bold;")
         form_layout.addRow(add_label)
 
-        self.new_unit_name = QComboBox()
-        self.new_unit_name.setEditable(True)
-        self.new_unit_name.addItems(COMMON_EXTRA_UNITS)
-        self.new_unit_name.setCurrentText("")
-        self.new_unit_name.lineEdit().setPlaceholderText("e.g. dozen, bundle, carton")
-        form_layout.addRow("Unit Name", self.new_unit_name)
+        # Unit name with picker button
+        name_row = QHBoxLayout()
+        self.new_unit_name = QLineEdit()
+        self.new_unit_name.setPlaceholderText("Click browse to select")
+        self.new_unit_name.setReadOnly(True)
+        name_row.addWidget(self.new_unit_name)
+        btn_pick = QPushButton("...")
+        btn_pick.setFixedWidth(36)
+        btn_pick.setToolTip("Select unit from list")
+        btn_pick.clicked.connect(self._pick_unit_name)
+        name_row.addWidget(btn_pick)
+        form_layout.addRow("Unit Name", name_row)
 
         self.new_conversion = QDoubleSpinBox()
         self.new_conversion.setRange(0.001, 999999)
-        self.new_conversion.setValue(12)
-        self.new_conversion.setDecimals(0)
-        form_layout.addRow(f"1 unit = N {product.base_unit}s", self.new_conversion)
-
-        self.chk_def_purchase = QCheckBox("Set as default for purchases")
-        self.chk_def_sale = QCheckBox("Set as default for sales")
-        form_layout.addRow(self.chk_def_purchase)
-        form_layout.addRow(self.chk_def_sale)
+        self.new_conversion.setValue(1)
+        self.new_conversion.setDecimals(3)
+        form_layout.addRow(f"1 unit = N {product.base_unit}(s)", self.new_conversion)
 
         btn_add = QPushButton("Add Unit")
         btn_add.clicked.connect(self._add_unit)
@@ -549,15 +364,55 @@ class UnitsDialog(QDialog):
 
         self._refresh_units()
 
+    def _pick_unit_name(self):
+        dlg = ItemPickerDialog(self, mode="unit")
+        if dlg.exec() == QDialog.Accepted:
+            name, count = dlg.get_selected()
+            if name:
+                self.new_unit_name.setText(name)
+                self.new_conversion.setValue(
+                    self._compute_conversion(name, count or 1)
+                )
+
+    def _compute_conversion(self, unit_name: str, fallback: float) -> float:
+        """Compute conversion_to_base for unit_name relative to product's base unit.
+
+        Strategy:
+        1. Same as base unit → 1
+        2. Direct lookup: SUGGESTED_UNITS[base] has this unit → use that value
+        3. Inverse lookup: SUGGESTED_UNITS[unit_name] has base → use 1/value
+        4. Fall back to the picker's default_count
+        """
+        base = self.product.base_unit.lower()
+        picked = unit_name.strip().lower()
+
+        if picked == base:
+            return 1.0
+
+        # Direct: base unit's suggestions contain the picked unit
+        for sname, sconv in SUGGESTED_UNITS.get(base, []):
+            if sname.lower() == picked:
+                return sconv
+
+        # Inverse: picked unit's suggestions contain the base unit
+        for sname, sconv in SUGGESTED_UNITS.get(picked, []):
+            if sname.lower() == base:
+                # sconv means "1 picked = sconv base" from picked's perspective
+                # We need "1 picked = ? product_base"
+                # Since picked is the base in that entry, sconv = how many picked per sname
+                # So 1 unit_name = 1/sconv base_units
+                return round(1.0 / sconv, 6) if sconv else fallback
+
+        return fallback
+
     def _refresh_units(self):
         units = get_units_for_product(self.product.id)
         self.units_table.setRowCount(len(units))
         for row, u in enumerate(units):
             self.units_table.setItem(row, 0, QTableWidgetItem(u.unit_name))
-            self.units_table.setItem(row, 1, QTableWidgetItem(f"{u.conversion_to_base:,.0f}"))
-            self.units_table.setItem(row, 2, QTableWidgetItem("Yes" if u.is_default_purchase else ""))
-            self.units_table.setItem(row, 3, QTableWidgetItem("Yes" if u.is_default_sale else ""))
-            for col in range(4):
+            conv_display = f"{u.conversion_to_base:g}"
+            self.units_table.setItem(row, 1, QTableWidgetItem(conv_display))
+            for col in range(2):
                 item = self.units_table.item(row, col)
                 if item:
                     item.setTextAlignment(Qt.AlignCenter)
@@ -568,11 +423,11 @@ class UnitsDialog(QDialog):
             btn_del.setFixedSize(32, 26)
             btn_del.setToolTip("Remove unit")
             btn_del.clicked.connect(lambda _, uid=u.id: self._delete_unit(uid))
-            self.units_table.setCellWidget(row, 4, btn_del)
+            self.units_table.setCellWidget(row, 2, btn_del)
             self.units_table.setRowHeight(row, 38)
 
     def _add_unit(self):
-        name = self.new_unit_name.currentText().strip()
+        name = self.new_unit_name.text().strip()
         if not name:
             QMessageBox.warning(self, "Validation", "Unit name is required.")
             return
@@ -580,10 +435,9 @@ class UnitsDialog(QDialog):
             self.product.id,
             name,
             self.new_conversion.value(),
-            self.chk_def_purchase.isChecked(),
-            self.chk_def_sale.isChecked(),
         )
-        self.new_unit_name.setCurrentText("")
+        self.new_unit_name.setText("")
+        self.new_conversion.setValue(1)
         self._refresh_units()
 
     def _delete_unit(self, unit_id: int):

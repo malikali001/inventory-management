@@ -98,7 +98,7 @@ def get_low_stock_items() -> List[Dict]:
                   pu.conversion_to_base AS display_conversion
            FROM products p
            LEFT JOIN inventory i ON i.product_id = p.id
-           LEFT JOIN product_units pu ON pu.product_id = p.id AND pu.is_default_sale = 1
+           LEFT JOIN product_units pu ON pu.product_id = p.id AND pu.conversion_to_base = 1
            WHERE p.is_active = 1
              AND p.low_stock_threshold > 0
              AND COALESCE(i.quantity_base, 0) <= p.low_stock_threshold
@@ -134,16 +134,29 @@ def get_purchase_history_summary(limit: int = 50) -> List[Dict]:
         (limit,),
     ).fetchall()
 
-    return [
-        {
+    result = []
+    for row in rows:
+        # Fetch item details for this purchase
+        items = conn.execute(
+            """SELECT pr.name, pi.quantity, pu.unit_name
+               FROM purchase_items pi
+               JOIN products pr ON pr.id = pi.product_id
+               JOIN product_units pu ON pu.id = pi.unit_id
+               WHERE pi.purchase_id = ?""",
+            (row["id"],),
+        ).fetchall()
+        items_text = ", ".join(
+            f"{it['name']} ({it['quantity']:g} {it['unit_name']})" for it in items
+        )
+        result.append({
             "id": row["id"],
             "date": row["date"],
             "notes": row["notes"] or "",
             "item_count": row["item_count"],
+            "items_text": items_text,
             "total": row["total"],
-        }
-        for row in rows
-    ]
+        })
+    return result
 
 
 def get_sales_by_date(date_from: str, date_to: str) -> List[Dict]:

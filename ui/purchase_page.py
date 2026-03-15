@@ -130,7 +130,10 @@ class PurchasePage(QWidget):
         self.history_table.setRowCount(len(purchases))
         for row, p in enumerate(purchases):
             self.history_table.setItem(row, 0, QTableWidgetItem(p.date))
-            self.history_table.setItem(row, 1, QTableWidgetItem(str(len(p.items))))
+            items_text = ", ".join(
+                f"{it.product_name} ({it.quantity:g} {it.unit_name})" for it in p.items
+            )
+            self.history_table.setItem(row, 1, QTableWidgetItem(items_text))
             self.history_table.setItem(row, 2, QTableWidgetItem(f"{p.total:,.0f}"))
             self.history_table.setItem(row, 3, QTableWidgetItem(p.notes))
 
@@ -219,7 +222,7 @@ class PurchasePage(QWidget):
             return
         for u in product.units:
             unit_combo.addItem(u.unit_name, u.id)
-            if u.is_default_purchase:
+            if u.conversion_to_base == 1:
                 unit_combo.setCurrentIndex(unit_combo.count() - 1)
 
     def _remove_row(self, row: int):
