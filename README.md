@@ -154,17 +154,16 @@ Sidebar → Settings
 
 ## Where Is My Data Stored?
 
-Your database file is saved at:
-```
-C:\Users\<YourName>\AppData\Roaming\InventoryManager\inventory.db
-```
+| Platform | Data Folder |
+|----------|-------------|
+| Windows | `%APPDATA%\InventoryManager\` |
+| macOS | `~/Library/Application Support/InventoryManager/` |
+| Linux | `~/.local/share/InventoryManager/` |
 
-Backups are saved in the same folder under `backups/`.
-
-Logs are saved at:
-```
-C:\Users\<YourName>\AppData\Roaming\InventoryManager\app.log
-```
+Inside that folder you'll find:
+- `inventory.db` — your database
+- `app.log` — application log
+- `backups/` — auto-backup files
 
 > Tip: Copy the `inventory.db` file to a USB drive or cloud folder for extra safety.
 > Or connect Google Drive in Settings for automatic cloud backup.
@@ -225,16 +224,41 @@ To enable automatic cloud backup:
 
 ---
 
-## Build a Standalone .exe (Optional)
+## Build Standalone App (Optional)
 
-If you want to run the app without Python installed:
+Build a self-contained executable — no Python installation needed on the target machine.
+
+### Prerequisites
 
 ```
 pip install pyinstaller
-pyinstaller --onefile --windowed --name "InventoryManager" main.py
 ```
 
-The `.exe` file will be in the `dist/` folder. You can copy it anywhere and run it directly.
+### Build for Current Platform
+
+```
+python build.py
+```
+
+Or with a clean build (removes previous artifacts):
+
+```
+python build.py --clean
+```
+
+### Platform Output
+
+| Platform | Output | Data Location |
+|----------|--------|---------------|
+| Windows | `dist/InventoryManager.exe` | `%APPDATA%\InventoryManager\` |
+| macOS | `dist/InventoryManager.app` | `~/Library/Application Support/InventoryManager/` |
+| Linux | `dist/InventoryManager` | `~/.local/share/InventoryManager/` |
+
+### Distribute
+
+- **Windows:** Send `InventoryManager.exe` — users double-click to run
+- **macOS:** Send `InventoryManager.app` — users drag to Applications folder
+- **Linux:** Send `InventoryManager` binary — users run `chmod +x InventoryManager && ./InventoryManager`
 
 ---
 
@@ -244,7 +268,13 @@ The `.exe` file will be in the `dist/` folder. You can copy it anywhere and run 
 inventory-management/
 ├── main.py                 # App entry point
 ├── version.py              # App version (single source of truth)
+├── build.py                # Cross-platform build script
+├── InventoryManager.spec   # PyInstaller configuration
 ├── requirements.txt        # Python dependencies
+├── assets/
+│   ├── icon.png            # App icon (source, 512x512)
+│   ├── icon.ico            # Windows icon
+│   └── icon.icns           # macOS icon
 ├── database/
 │   ├── connection.py       # SQLite database connection
 │   ├── schema.py           # Table creation
