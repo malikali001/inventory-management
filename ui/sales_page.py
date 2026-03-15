@@ -1,3 +1,4 @@
+import logging
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QComboBox, QDoubleSpinBox,
@@ -9,6 +10,8 @@ from services.product_service import get_all_products
 from services.sale_service import record_sale, get_sale_history, delete_sale
 from models.product import Product
 from ui.styles import COLORS
+
+logger = logging.getLogger(__name__)
 
 
 class SalesPage(QWidget):
@@ -245,17 +248,24 @@ class SalesPage(QWidget):
 
     def _submit(self):
         items = self._collect_items()
+        if items is None:
+            return  # validation error already shown
         if not items:
             QMessageBox.warning(self, "No Items", "Please add at least one item.")
             return
         sale_date = self.date_edit.date().toString("yyyy-MM-dd")
         notes = self.notes_edit.text().strip()
-        record_sale(sale_date, notes, items)
+        try:
+            record_sale(sale_date, notes, items)
+        except Exception as e:
+            logger.exception("Failed to record sale")
+            QMessageBox.critical(self, "Error", f"Failed to record sale:\n{e}")
+            return
         QMessageBox.information(self, "Saved", "Sales entry recorded successfully.")
         self._clear_form()
         self._refresh_history()
 
-    def _collect_items(self) -> list[dict]:
+    def _collect_items(self) -> list[dict] | None:
         items = []
         for row in range(self.item_table.rowCount()):
             product_combo = self.item_table.cellWidget(row, 0)
@@ -276,7 +286,16 @@ class SalesPage(QWidget):
                 continue
             unit = next((u for u in product.units if u.id == unit_id), None)
             if not unit:
-                continue
+                QMessageBox.warning(self, "Validation", f"Row {row + 1}: please select a unit.")
+                return None
+
+            if qty <= 0:
+                QMessageBox.warning(self, "Validation", f"Row {row + 1}: quantity must be greater than 0.")
+                return None
+
+            if price <= 0:
+                QMessageBox.warning(self, "Validation", f"Row {row + 1}: price must be greater than 0.")
+                return None
 
             items.append({
                 "product_id": product_id,
@@ -303,5 +322,10 @@ class SalesPage(QWidget):
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
-            delete_sale(sale_id)
+            try:
+                delete_sale(sale_id)
+            except Exception as e:
+                logger.exception("Failed to delete sale")
+                QMessageBox.critical(self, "Error", f"Failed to delete sale:\n{e}")
+                return
             self._refresh_history()

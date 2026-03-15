@@ -1,14 +1,16 @@
+import logging
 import os
 import sys
 import subprocess
 import tempfile
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFrame, QTableWidget, QTableWidgetItem, QHeaderView,
     QFileDialog, QMessageBox, QScrollArea,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QColor
 
 from ui.styles import COLORS, get_current_theme, set_theme
@@ -16,6 +18,13 @@ from services.backup_service import (
     create_backup, restore_backup, list_auto_backups, get_backups_folder,
 )
 from services import google_drive_service as gdrive
+
+logger = logging.getLogger(__name__)
+
+
+class _DriveConnectSignal(QObject):
+    """Signal bridge: daemon thread emits result back to the main thread."""
+    finished = Signal(bool, str)  # (success, message)
 
 
 class SettingsPage(QWidget):
@@ -172,6 +181,12 @@ class SettingsPage(QWidget):
             "Connect your Google Drive to automatically sync backups to the cloud."
         ))
 
+        # Missing-credentials guidance (hidden by default)
+        self.drive_no_creds_label = QLabel("")
+        self.drive_no_creds_label.setWordWrap(True)
+        self.drive_no_creds_label.setVisible(False)
+        dl.addWidget(self.drive_no_creds_label)
+
         # Connected info (hidden by default)
         self.drive_connected_label = QLabel("")
         self.drive_connected_label.setObjectName("hint_label")
@@ -187,6 +202,14 @@ class SettingsPage(QWidget):
         self.btn_drive_connect.setFixedWidth(200)
         self.btn_drive_connect.clicked.connect(self._on_drive_connect)
         drive_btn_row.addWidget(self.btn_drive_connect)
+
+        self.btn_drive_cancel = QPushButton("Cancel")
+        self.btn_drive_cancel.setObjectName("btn_danger")
+        self.btn_drive_cancel.setFixedHeight(40)
+        self.btn_drive_cancel.setFixedWidth(100)
+        self.btn_drive_cancel.clicked.connect(self._on_drive_cancel)
+        self.btn_drive_cancel.setVisible(False)
+        drive_btn_row.addWidget(self.btn_drive_cancel)
 
         self.btn_drive_upload = QPushButton("Upload Now")
         self.btn_drive_upload.setObjectName("btn_secondary")
@@ -333,15 +356,46 @@ class SettingsPage(QWidget):
     # ── Google Drive actions ──────────────────────────────────────────────
 
     def _on_drive_connect(self):
+        import threading
+
         self.drive_status.setText("")
-        try:
-            gdrive.connect()
+        self.btn_drive_connect.setVisible(False)
+        self.btn_drive_cancel.setVisible(True)
+        self._drive_cancelled = False
+
+        self._connect_signal = _DriveConnectSignal()
+        self._connect_signal.finished.connect(self._on_drive_connect_done)
+
+        def _run():
+            try:
+                gdrive.connect(timeout=120)
+                self._connect_signal.finished.emit(True, "Connected successfully!")
+            except Exception as e:
+                logger.exception("Google Drive connect failed")
+                self._connect_signal.finished.emit(False, str(e))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _on_drive_cancel(self):
+        self._drive_cancelled = True
+        self.btn_drive_cancel.setVisible(False)
+        self.btn_drive_connect.setVisible(True)
+        self.drive_status.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+        self.drive_status.setText("Connection cancelled. The browser tab can be closed.")
+
+    def _on_drive_connect_done(self, success: bool, message: str):
+        self.btn_drive_cancel.setVisible(False)
+        self.btn_drive_connect.setVisible(True)
+
+        if self._drive_cancelled:
+            return  # user already cancelled — ignore the result
+
+        if success:
             self._refresh_drive_ui()
             self.drive_status.setStyleSheet(f"color: {COLORS['accent_teal']}; font-size: 12px;")
-            self.drive_status.setText("Connected successfully!")
-        except Exception as e:
+        else:
             self.drive_status.setStyleSheet(f"color: {COLORS['accent_red']}; font-size: 12px;")
-            self.drive_status.setText(f"Connection failed: {e}")
+        self.drive_status.setText(message)
 
     def _on_drive_disconnect(self):
         reply = QMessageBox.question(
@@ -359,18 +413,20 @@ class SettingsPage(QWidget):
 
     def _on_drive_upload(self):
         self.drive_status.setText("Uploading...")
+        tmp = tempfile.mktemp(suffix=".zip", prefix="drive_backup_")
         try:
-            # Create a temp backup and upload it
-            tmp = tempfile.mktemp(suffix=".zip", prefix="drive_backup_")
             create_backup(tmp)
             gdrive.upload_backup(tmp)
-            os.remove(tmp)
             self._refresh_drive_table()
             self.drive_status.setStyleSheet(f"color: {COLORS['accent_teal']}; font-size: 12px;")
             self.drive_status.setText("Uploaded to Google Drive!")
         except Exception as e:
+            logger.exception("Google Drive upload failed")
             self.drive_status.setStyleSheet(f"color: {COLORS['accent_red']}; font-size: 12px;")
             self.drive_status.setText(f"Upload failed: {e}")
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
 
     def _on_drive_restore(self):
         self.drive_status.setText("")
@@ -400,21 +456,49 @@ class SettingsPage(QWidget):
         if reply != QMessageBox.Yes:
             return
 
+        tmp = tempfile.mktemp(suffix=".zip", prefix="drive_restore_")
         try:
-            tmp = tempfile.mktemp(suffix=".zip", prefix="drive_restore_")
             gdrive.download_backup(latest["id"], tmp)
             restore_backup(tmp)
-            os.remove(tmp)
             self.drive_status.setStyleSheet(f"color: {COLORS['accent_teal']}; font-size: 12px;")
             self.drive_status.setText("Restored from Google Drive! All pages refreshed.")
             self._refresh_all_pages()
         except Exception as e:
+            logger.exception("Google Drive restore failed")
             self.drive_status.setStyleSheet(f"color: {COLORS['accent_red']}; font-size: 12px;")
             self.drive_status.setText(f"Restore failed: {e}")
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
 
     def _refresh_drive_ui(self):
-        """Toggle Drive UI between connected/disconnected states."""
-        connected = gdrive.is_connected()
+        """Toggle Drive UI between connected/disconnected/no-creds states."""
+        has_creds = gdrive.credentials_available()
+        connected = has_creds and gdrive.is_connected()
+
+        # No credentials at all — show guidance, hide everything else
+        if not has_creds:
+            from database.connection import get_db_path
+            app_data = Path(get_db_path()).parent
+            self.drive_no_creds_label.setText(
+                f"Google Drive backup requires a credentials.json file.\n"
+                f"Place it in: {app_data}\n"
+                f"Contact your administrator if you don't have this file."
+            )
+            self.drive_no_creds_label.setStyleSheet(
+                f"color: {COLORS['text_secondary']}; font-size: 12px; "
+                f"padding: 8px; background: {COLORS['bg_card']}; border-radius: 4px;"
+            )
+            self.drive_no_creds_label.setVisible(True)
+            self.btn_drive_connect.setVisible(False)
+            self.btn_drive_upload.setVisible(False)
+            self.btn_drive_restore.setVisible(False)
+            self.btn_drive_disconnect.setVisible(False)
+            self.drive_connected_label.setVisible(False)
+            self.drive_table.setVisible(False)
+            return
+
+        self.drive_no_creds_label.setVisible(False)
 
         # Toggle visibility
         self.btn_drive_connect.setVisible(not connected)
@@ -432,6 +516,7 @@ class SettingsPage(QWidget):
                     f"color: {COLORS['accent_teal']}; font-size: 13px; font-weight: bold;"
                 )
             except Exception:
+                logger.warning("Could not fetch Google Drive email", exc_info=True)
                 self.drive_connected_label.setText("Connected")
             self._refresh_drive_table()
 
@@ -440,6 +525,7 @@ class SettingsPage(QWidget):
         try:
             backups = gdrive.list_drive_backups()
         except Exception:
+            logger.warning("Failed to list Google Drive backups", exc_info=True)
             backups = []
 
         self.drive_table.setRowCount(len(backups))

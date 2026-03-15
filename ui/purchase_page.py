@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
@@ -11,6 +12,8 @@ from services.product_service import get_all_products
 from services.purchase_service import record_purchase, get_purchase_history, delete_purchase
 from models.product import Product, ProductUnit
 from ui.styles import COLORS
+
+logger = logging.getLogger(__name__)
 
 
 class PurchasePage(QWidget):
@@ -161,7 +164,7 @@ class PurchasePage(QWidget):
         product_combo = QComboBox()
         product_combo.setEditable(True)
         product_combo.setInsertPolicy(QComboBox.NoInsert)
-        if hasattr(product_combo, 'completer') and product_combo.completer():
+        if product_combo.completer():
             product_combo.completer().setFilterMode(Qt.MatchContains)
             product_combo.completer().setCaseSensitivity(Qt.CaseInsensitive)
         self._populate_product_combo(product_combo)
@@ -244,17 +247,24 @@ class PurchasePage(QWidget):
 
     def _submit(self):
         items = self._collect_items()
+        if items is None:
+            return  # validation error already shown
         if not items:
             QMessageBox.warning(self, "No Items", "Please add at least one item.")
             return
         purchase_date = self.date_edit.date().toString("yyyy-MM-dd")
         notes = self.notes_edit.text().strip()
-        record_purchase(purchase_date, notes, items)
+        try:
+            record_purchase(purchase_date, notes, items)
+        except Exception as e:
+            logger.exception("Failed to record purchase")
+            QMessageBox.critical(self, "Error", f"Failed to record purchase:\n{e}")
+            return
         QMessageBox.information(self, "Saved", "Purchase recorded successfully.")
         self._clear_form()
         self._refresh_history()
 
-    def _collect_items(self) -> list[dict]:
+    def _collect_items(self) -> list[dict] | None:
         items = []
         for row in range(self.item_table.rowCount()):
             product_combo = self.item_table.cellWidget(row, 0)
@@ -275,7 +285,16 @@ class PurchasePage(QWidget):
                 continue
             unit = next((u for u in product.units if u.id == unit_id), None)
             if not unit:
-                continue
+                QMessageBox.warning(self, "Validation", f"Row {row + 1}: please select a unit.")
+                return None
+
+            if qty <= 0:
+                QMessageBox.warning(self, "Validation", f"Row {row + 1}: quantity must be greater than 0.")
+                return None
+
+            if price <= 0:
+                QMessageBox.warning(self, "Validation", f"Row {row + 1}: price must be greater than 0.")
+                return None
 
             items.append({
                 "product_id": product_id,
@@ -302,5 +321,10 @@ class PurchasePage(QWidget):
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
-            delete_purchase(purchase_id)
+            try:
+                delete_purchase(purchase_id)
+            except Exception as e:
+                logger.exception("Failed to delete purchase")
+                QMessageBox.critical(self, "Error", f"Failed to delete purchase:\n{e}")
+                return
             self._refresh_history()

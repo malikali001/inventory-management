@@ -5,8 +5,12 @@ Handles OAuth2 authentication and file operations for syncing
 inventory backups to/from Google Drive.
 """
 
+import logging
 import os
+import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from database.connection import get_db_path
 
@@ -34,16 +38,34 @@ def _token_path() -> str:
 
 
 def _credentials_path() -> str:
-    """Path to the bundled OAuth client credentials."""
-    # Look next to the main script first, then in the app data dir
-    candidates = [
-        Path(__file__).resolve().parent.parent / "credentials.json",
-        Path(get_db_path()).parent / "credentials.json",
-    ]
+    """Path to the bundled OAuth client credentials.
+
+    Search order:
+    1. PyInstaller bundle (sys._MEIPASS) — for .exe distribution
+    2. App data directory (%APPDATA%/InventoryManager/)
+    3. Project root (development)
+    """
+    candidates = []
+
+    # PyInstaller bundle
+    if hasattr(sys, "_MEIPASS"):
+        candidates.append(Path(sys._MEIPASS) / "credentials.json")
+
+    # App data dir (where the DB lives)
+    candidates.append(Path(get_db_path()).parent / "credentials.json")
+
+    # Project root (development convenience)
+    candidates.append(Path(__file__).resolve().parent.parent / "credentials.json")
+
     for p in candidates:
         if p.exists():
             return str(p)
-    return str(candidates[0])  # default even if missing — connect() will error
+    return ""  # empty string signals "not found"
+
+
+def credentials_available() -> bool:
+    """Return True if a credentials.json file exists in any search path."""
+    return _credentials_path() != ""
 
 
 def _load_creds() -> "Credentials | None":
@@ -89,10 +111,13 @@ def is_connected() -> bool:
     return _load_creds() is not None
 
 
-def connect() -> bool:
+def connect(timeout: int = 120) -> bool:
     """
     Run the OAuth2 desktop flow (opens browser).
     Returns True on success.
+
+    The local redirect server shuts down after *timeout* seconds so the
+    app never hangs indefinitely if the user closes the browser.
     """
     if not _HAS_GOOGLE:
         raise RuntimeError(
@@ -100,14 +125,28 @@ def connect() -> bool:
             "Run: pip install google-api-python-client google-auth-oauthlib google-auth-httplib2"
         )
     creds_file = _credentials_path()
-    if not os.path.exists(creds_file):
+    if not creds_file or not os.path.exists(creds_file):
+        app_data = Path(get_db_path()).parent
         raise FileNotFoundError(
-            f"credentials.json not found.\n"
-            f"Expected at: {creds_file}\n"
-            "Download it from Google Cloud Console."
+            "credentials.json not found.\n\n"
+            "To enable Google Drive backup, place credentials.json in:\n"
+            f"  {app_data}\n\n"
+            "Contact your administrator or download it from\n"
+            "the Google Cloud Console."
         )
     flow = InstalledAppFlow.from_client_secrets_file(creds_file, SCOPES)
-    creds = flow.run_local_server(port=0)
+    try:
+        creds = flow.run_local_server(
+            port=0, open_browser=True, timeout_seconds=timeout,
+        )
+    except Exception as e:
+        if "timeout" in str(e).lower():
+            raise TimeoutError(
+                "Google sign-in was not completed in time.\n"
+                "Please try again and complete the authorization in your browser."
+            ) from e
+        raise
+
     with open(_token_path(), "w") as f:
         f.write(creds.to_json())
     return True

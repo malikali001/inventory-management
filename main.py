@@ -1,12 +1,30 @@
+import logging
 import os
 import sys
+from pathlib import Path
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt
 
-from database.connection import get_db_path
+from database.connection import get_db_path, close_connection
 from database.schema import init_db
 from ui.main_window import MainWindow
 from services.backup_service import auto_backup
+
+logger = logging.getLogger(__name__)
+
+
+def _setup_logging():
+    """Configure logging to file and console."""
+    log_dir = Path(get_db_path()).parent
+    log_file = log_dir / "app.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, encoding="utf-8"),
+            logging.StreamHandler(),
+        ],
+    )
 
 
 def _safe_backup():
@@ -14,7 +32,7 @@ def _safe_backup():
     try:
         auto_backup()
     except Exception:
-        pass
+        logger.exception("Auto-backup failed on shutdown")
 
 
 def _offer_backup_restore():
@@ -35,7 +53,7 @@ def _offer_backup_restore():
             if drive_backups:
                 latest_drive = drive_backups[0]
     except Exception:
-        pass
+        logger.warning("Could not check Google Drive backups", exc_info=True)
 
     if not latest_local and not latest_drive:
         return
@@ -70,27 +88,44 @@ def _offer_backup_restore():
     if reply != QMessageBox.Yes:
         return
 
+    tmp = None
     try:
         if source == "drive":
             from services.google_drive_service import download_backup
             tmp = tempfile.mktemp(suffix=".zip", prefix="drive_restore_")
             download_backup(info["id"], tmp)
             restore_backup(tmp)
-            os.remove(tmp)
         else:
             restore_backup(info["path"])
     except Exception:
+        logger.exception("Backup restore failed during initial setup")
         QMessageBox.warning(
             None,
             "Restore Failed",
             "Could not restore the backup. Starting with a fresh database.",
         )
+    finally:
+        if tmp and os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Inventory Manager")
     app.setStyle("Fusion")
+
+    _setup_logging()
+    logger.info("Application starting")
+
+    # Global exception handler — log and show dialog instead of silent crash
+    def _handle_exception(exc_type, exc_value, exc_tb):
+        logger.critical("Unhandled exception", exc_info=(exc_type, exc_value, exc_tb))
+        QMessageBox.critical(
+            None, "Unexpected Error",
+            f"An unexpected error occurred:\n{exc_value}\n\n"
+            "Details have been written to app.log.",
+        )
+    sys.excepthook = _handle_exception
 
     # Detect fresh install before init_db creates the DB
     is_fresh = not os.path.exists(get_db_path())
@@ -102,10 +137,14 @@ def main():
     if is_fresh:
         _offer_backup_restore()
 
-    # Auto-backup on app close so the latest data is always captured
-    app.aboutToQuit.connect(_safe_backup)
+    # Auto-backup and clean shutdown
+    def _safe_shutdown():
+        _safe_backup()
+        close_connection()
 
-    window = MainWindow()
+    app.aboutToQuit.connect(_safe_shutdown)
+
+    window = MainWindow(is_fresh=is_fresh)
     window.show()
 
     sys.exit(app.exec())

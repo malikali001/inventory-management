@@ -1,3 +1,4 @@
+import logging
 from datetime import date, timedelta
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
@@ -17,6 +18,8 @@ from services.report_service import (
 )
 from services.inventory_service import get_total_inventory_value
 from ui.styles import LOW_STOCK_ROW_COLOR, LOW_STOCK_TEXT_COLOR, COLORS
+
+logger = logging.getLogger(__name__)
 
 
 class StatCard(QFrame):
@@ -455,27 +458,34 @@ class DashboardPage(QWidget):
         today = date.today()
         self.date_label.setText(f"Today: {today.strftime('%d %B %Y')}")
 
-        # Stat cards
-        summary = get_daily_summary(today.isoformat(), today.isoformat())
-        self.card_revenue.update_value(f"{summary['revenue']:,.0f}")
-        self.card_cost.update_value(f"{summary['cost']:,.0f}")
+        try:
+            # Stat cards
+            summary = get_daily_summary(today.isoformat(), today.isoformat())
+            self.card_revenue.update_value(f"{summary['revenue']:,.0f}")
+            self.card_cost.update_value(f"{summary['cost']:,.0f}")
 
-        profit = summary["profit"]
-        profit_color = COLORS["accent_teal"] if profit >= 0 else COLORS["accent_red"]
-        self.card_profit.set_color(profit_color)
-        self.card_profit.update_value(f"{profit:,.0f}")
+            profit = summary["profit"]
+            profit_color = COLORS["accent_teal"] if profit >= 0 else COLORS["accent_red"]
+            self.card_profit.set_color(profit_color)
+            self.card_profit.update_value(f"{profit:,.0f}")
 
-        inv_val = get_total_inventory_value()
-        self.card_inventory_val.update_value(f"{inv_val['total_value']:,.0f}")
+            inv_val = get_total_inventory_value()
+            self.card_inventory_val.update_value(f"{inv_val['total_value']:,.0f}")
 
-        low_stock = get_low_stock_items()
-        self.card_lowstock.update_value(str(len(low_stock)))
+            low_stock = get_low_stock_items()
+            self.card_lowstock.update_value(str(len(low_stock)))
+        except Exception:
+            logger.exception("Failed to load dashboard data")
+            low_stock = []
 
         # Charts
-        self._draw_revenue_chart()
-        self._draw_products_chart()
-        self._draw_inventory_donut()
-        self._draw_stock_levels()
+        try:
+            self._draw_revenue_chart()
+            self._draw_products_chart()
+            self._draw_inventory_donut()
+            self._draw_stock_levels()
+        except Exception:
+            logger.exception("Failed to render dashboard charts")
 
         # Low stock table
         self.low_stock_table.setRowCount(len(low_stock))

@@ -1,3 +1,4 @@
+import logging
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QDialog, QFormLayout,
@@ -16,6 +17,8 @@ from services.product_service import (
 from models.product import Product, ProductUnit
 from ui.styles import COLORS
 from ui.dialogs.picker_dialog import ItemPickerDialog
+
+logger = logging.getLogger(__name__)
 
 
 class ProductsPage(QWidget):
@@ -119,14 +122,24 @@ class ProductsPage(QWidget):
         dlg = ProductDialog(self)
         if dlg.exec() == QDialog.Accepted:
             d = dlg.get_data()
-            create_product(d["name"], d["category"], d["base_unit"], d["threshold"])
+            try:
+                create_product(d["name"], d["category"], d["base_unit"], d["threshold"])
+            except Exception as e:
+                logger.exception("Failed to create product")
+                QMessageBox.critical(self, "Error", f"Failed to create product:\n{e}")
+                return
             self.refresh()
 
     def _edit_product(self, product: Product):
         dlg = ProductDialog(self, product)
         if dlg.exec() == QDialog.Accepted:
             d = dlg.get_data()
-            update_product(product.id, d["name"], d["category"], d["base_unit"], d["threshold"])
+            try:
+                update_product(product.id, d["name"], d["category"], d["base_unit"], d["threshold"])
+            except Exception as e:
+                logger.exception("Failed to update product")
+                QMessageBox.critical(self, "Error", f"Failed to update product:\n{e}")
+                return
             self.refresh()
 
     def _remove_product(self, product_id: int, product_name: str):
@@ -134,7 +147,12 @@ class ProductsPage(QWidget):
         dlg = RemoveProductDialog(self, product_name)
         result = dlg.exec()
         if result == RemoveProductDialog.DISABLE:
-            deactivate_product(product_id)
+            try:
+                deactivate_product(product_id)
+            except Exception as e:
+                logger.exception("Failed to deactivate product")
+                QMessageBox.critical(self, "Error", f"Failed to deactivate product:\n{e}")
+                return
             self.refresh()
         elif result == RemoveProductDialog.DELETE:
             confirm = QMessageBox.warning(
@@ -147,11 +165,21 @@ class ProductsPage(QWidget):
                 QMessageBox.No,
             )
             if confirm == QMessageBox.Yes:
-                delete_product(product_id)
+                try:
+                    delete_product(product_id)
+                except Exception as e:
+                    logger.exception("Failed to delete product")
+                    QMessageBox.critical(self, "Error", f"Failed to delete product:\n{e}")
+                    return
                 self.refresh()
 
     def _enable_product(self, product_id: int):
-        reactivate_product(product_id)
+        try:
+            reactivate_product(product_id)
+        except Exception as e:
+            logger.exception("Failed to reactivate product")
+            QMessageBox.critical(self, "Error", f"Failed to reactivate product:\n{e}")
+            return
         self.refresh()
 
     def _manage_units(self, product: Product):

@@ -94,7 +94,7 @@ def _build_style(c: dict) -> str:
 /* ── Base ─────────────────────────────────────────────────────────────────── */
 QMainWindow, QWidget {{
     background-color: {c["bg_deep"]};
-    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+    font-family: 'Segoe UI', Arial, sans-serif;
     font-size: 13px;
     color: {c["text_primary"]};
 }}

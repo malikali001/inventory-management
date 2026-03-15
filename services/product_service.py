@@ -129,6 +129,12 @@ def create_product(
     low_stock_threshold: float,
 ) -> int:
     """Create a product with its base unit entry and inventory row."""
+    if not name.strip():
+        raise ValueError("Product name cannot be empty.")
+    if not base_unit.strip():
+        raise ValueError("Base unit cannot be empty.")
+    if low_stock_threshold < 0:
+        raise ValueError("Low stock threshold cannot be negative.")
     conn = get_connection()
     base = base_unit.strip()
     cur = conn.execute(
@@ -159,6 +165,12 @@ def update_product(
     base_unit: str,
     low_stock_threshold: float,
 ) -> None:
+    if not name.strip():
+        raise ValueError("Product name cannot be empty.")
+    if not base_unit.strip():
+        raise ValueError("Base unit cannot be empty.")
+    if low_stock_threshold < 0:
+        raise ValueError("Low stock threshold cannot be negative.")
     conn = get_connection()
     conn.execute(
         """UPDATE products SET name=?, category=?, base_unit=?,
@@ -198,6 +210,10 @@ def add_unit(
     is_default_purchase: bool = False,
     is_default_sale: bool = False,
 ) -> int:
+    if not unit_name.strip():
+        raise ValueError("Unit name cannot be empty.")
+    if conversion_to_base <= 0:
+        raise ValueError("Conversion factor must be greater than zero.")
     conn = get_connection()
     if is_default_purchase:
         conn.execute(

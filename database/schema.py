@@ -1,4 +1,5 @@
 from database.connection import get_connection
+from database.migrations import run_migrations
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS products (
@@ -15,14 +16,14 @@ CREATE TABLE IF NOT EXISTS product_units (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     product_id          INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     unit_name           TEXT    NOT NULL,
-    conversion_to_base  REAL    NOT NULL DEFAULT 1,
+    conversion_to_base  REAL    NOT NULL DEFAULT 1 CHECK (conversion_to_base > 0),
     is_default_purchase INTEGER DEFAULT 0,
     is_default_sale     INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS inventory (
     product_id    INTEGER PRIMARY KEY REFERENCES products(id),
-    quantity_base REAL    NOT NULL DEFAULT 0,
+    quantity_base REAL    NOT NULL DEFAULT 0 CHECK (quantity_base >= 0),
     last_updated  TEXT    DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -38,9 +39,9 @@ CREATE TABLE IF NOT EXISTS purchase_items (
     purchase_id    INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
     product_id     INTEGER NOT NULL REFERENCES products(id),
     unit_id        INTEGER NOT NULL REFERENCES product_units(id),
-    quantity       REAL    NOT NULL,
-    price_per_unit REAL    NOT NULL,
-    quantity_base  REAL    NOT NULL
+    quantity       REAL    NOT NULL CHECK (quantity > 0),
+    price_per_unit REAL    NOT NULL CHECK (price_per_unit >= 0),
+    quantity_base  REAL    NOT NULL CHECK (quantity_base > 0)
 );
 
 CREATE TABLE IF NOT EXISTS sales (
@@ -55,9 +56,9 @@ CREATE TABLE IF NOT EXISTS sale_items (
     sale_id        INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
     product_id     INTEGER NOT NULL REFERENCES products(id),
     unit_id        INTEGER NOT NULL REFERENCES product_units(id),
-    quantity       REAL    NOT NULL,
-    price_per_unit REAL    NOT NULL,
-    quantity_base  REAL    NOT NULL
+    quantity       REAL    NOT NULL CHECK (quantity > 0),
+    price_per_unit REAL    NOT NULL CHECK (price_per_unit >= 0),
+    quantity_base  REAL    NOT NULL CHECK (quantity_base > 0)
 );
 
 CREATE TABLE IF NOT EXISTS saved_units (
@@ -108,3 +109,5 @@ def init_db() -> None:
             (name,),
         )
     conn.commit()
+    # Apply any pending schema migrations
+    run_migrations(conn)

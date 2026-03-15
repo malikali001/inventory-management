@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import zipfile
@@ -6,6 +7,8 @@ from pathlib import Path
 
 from database.connection import get_db_path, close_connection, get_connection
 from database.schema import init_db
+
+logger = logging.getLogger(__name__)
 
 
 def _backups_dir() -> Path:
@@ -25,13 +28,21 @@ def create_backup(dest_zip_path: str) -> str:
     if not os.path.exists(db_path):
         raise FileNotFoundError("Database file not found.")
 
-    # Flush WAL to main DB before copying
-    get_connection().execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    # Flush WAL to main DB before copying (best-effort — may fail if DB is busy)
+    try:
+        get_connection().execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception:
+        logger.warning("WAL checkpoint failed (DB may be busy), backing up as-is")
     close_connection()
 
     try:
         with zipfile.ZipFile(dest_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.write(db_path, "inventory.db")
+        # Verify backup integrity
+        with zipfile.ZipFile(dest_zip_path, "r") as zf:
+            bad = zf.testzip()
+            if bad is not None:
+                raise ValueError(f"Backup verification failed: corrupt file {bad}")
     finally:
         get_connection()  # reopen
 
@@ -63,9 +74,6 @@ def restore_backup(zip_path: str) -> None:
             zf.extract("inventory.db", os.path.dirname(db_path))
 
         # Remove WAL/SHM leftovers from the old DB
-        for ext in (".db-wal", ".db-shm"):
-            leftover = db_path.replace(".db", ext) if ext != ".db-wal" else db_path + "-wal"
-            # Correct paths
         for suffix in ("-wal", "-shm"):
             leftover = db_path + suffix
             if os.path.exists(leftover):
@@ -113,7 +121,7 @@ def auto_backup() -> None:
         if is_connected():
             upload_backup(dest)
     except Exception:
-        pass
+        logger.warning("Google Drive upload failed during auto-backup", exc_info=True)
 
 
 def list_auto_backups() -> list[dict]:
