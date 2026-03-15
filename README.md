@@ -15,7 +15,9 @@ A simple offline desktop app to manage your **inventory**, **purchases**, **sale
 | **Sales** | Record what you sell to customers |
 | **Inventory** | See current stock levels with low-stock alerts |
 | **Reports** | View daily summaries, profit per product, and history |
-| **Backup** | Auto-backup on every app start (keeps last 5) |
+| **Backup** | Auto-backup on app close (keeps last 5), manual backup/restore |
+| **Google Drive** | Optional cloud sync for backups (requires credentials.json) |
+| **User Guide** | Built-in guide with visual diagrams for every feature |
 | **Themes** | Switch between dark and light mode |
 | **Export** | Export reports and data |
 
@@ -130,13 +132,22 @@ Sidebar → Reports
 - **Purchase History** — all past purchases
 - **Sales History** — all past sales
 
-### 7. Settings
+### 7. User Guide
+
+```
+Sidebar → User Guide
+```
+- Step-by-step instructions with visual flow diagrams
+- Covers products, purchases, sales, inventory, reports, and backups
+
+### 8. Settings
 
 ```
 Sidebar → Settings
 ```
 - Switch between **Dark** and **Light** theme
 - Manage backups (auto-backup + manual backup/restore)
+- Connect Google Drive for automatic cloud sync
 - Export your data
 
 ---
@@ -150,7 +161,13 @@ C:\Users\<YourName>\AppData\Roaming\InventoryManager\inventory.db
 
 Backups are saved in the same folder under `backups/`.
 
+Logs are saved at:
+```
+C:\Users\<YourName>\AppData\Roaming\InventoryManager\app.log
+```
+
 > Tip: Copy the `inventory.db` file to a USB drive or cloud folder for extra safety.
+> Or connect Google Drive in Settings for automatic cloud backup.
 
 ---
 
@@ -169,6 +186,7 @@ Backups are saved in the same folder under `backups/`.
 │ Sales    │  │                              │    │
 │ Inventory│  └──────────────────────────────┘    │
 │ Reports  │                                      │
+│ Guide    │                                      │
 │ Settings │                                      │
 │          │                                      │
 ├──────────┴──────────────────────────────────────┤
@@ -190,6 +208,23 @@ Purchase ──→ Inventory ←── Sale
 
 ---
 
+## Google Drive Backup (Optional)
+
+To enable automatic cloud backup:
+
+1. Get a `credentials.json` file (Google OAuth client credentials)
+2. Place it in your data folder:
+   ```
+   C:\Users\<YourName>\AppData\Roaming\InventoryManager\credentials.json
+   ```
+3. Go to **Settings → Google Drive Backup → Connect Google Drive**
+4. Sign in with your Google account in the browser
+5. Backups will now sync to a `InventoryManager_Backups` folder on your Drive
+
+> If you don't have a `credentials.json` file, the Settings page will show instructions. Contact your administrator for the file.
+
+---
+
 ## Build a Standalone .exe (Optional)
 
 If you want to run the app without Python installed:
@@ -208,10 +243,12 @@ The `.exe` file will be in the `dist/` folder. You can copy it anywhere and run 
 ```
 inventory-management/
 ├── main.py                 # App entry point
+├── version.py              # App version (single source of truth)
 ├── requirements.txt        # Python dependencies
 ├── database/
 │   ├── connection.py       # SQLite database connection
-│   └── schema.py           # Table creation
+│   ├── schema.py           # Table creation
+│   └── migrations.py       # Schema migration runner
 ├── models/
 │   ├── product.py          # Product & unit data models
 │   ├── purchase.py         # Purchase data model
@@ -223,7 +260,8 @@ inventory-management/
 │   ├── inventory_service.py# Stock calculations
 │   ├── report_service.py   # Report generation
 │   ├── backup_service.py   # Auto & manual backups
-│   └── export_service.py   # Data export
+│   ├── export_service.py   # Data export
+│   └── google_drive_service.py  # Google Drive cloud sync
 └── ui/
     ├── styles.py           # Themes & styling
     ├── main_window.py      # Main window with sidebar
@@ -233,7 +271,8 @@ inventory-management/
     ├── sales_page.py       # Record sales
     ├── inventory_page.py   # Stock levels
     ├── reports_page.py     # Reports & analytics
-    └── settings_page.py    # App settings
+    ├── guide_page.py       # Built-in user guide
+    └── settings_page.py    # App settings & backups
 ```
 
 ---
@@ -247,6 +286,8 @@ inventory-management/
 | App won't start | Make sure you're in the project folder and ran `pip install -r requirements.txt` |
 | Can't find my data | Check `%APPDATA%\InventoryManager\` in File Explorer |
 | Want to reset everything | Delete `inventory.db` from the AppData folder and restart the app |
+| Google Drive won't connect | Make sure `credentials.json` is in the AppData folder |
+| App shows errors | Check `app.log` in the AppData folder for details |
 
 ---
 
