@@ -35,13 +35,21 @@ CREATE TABLE IF NOT EXISTS purchases (
 );
 
 CREATE TABLE IF NOT EXISTS purchase_items (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    purchase_id    INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
-    product_id     INTEGER NOT NULL REFERENCES products(id),
-    unit_id        INTEGER NOT NULL REFERENCES product_units(id),
-    quantity       REAL    NOT NULL CHECK (quantity > 0),
-    price_per_unit REAL    NOT NULL CHECK (price_per_unit >= 0),
-    quantity_base  REAL    NOT NULL CHECK (quantity_base > 0)
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id         INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+    product_id          INTEGER NOT NULL REFERENCES products(id),
+    unit_id             INTEGER NOT NULL REFERENCES product_units(id),
+    quantity            REAL    NOT NULL CHECK (quantity > 0),
+    price_per_unit      REAL    NOT NULL CHECK (price_per_unit >= 0),
+    quantity_base       REAL    NOT NULL CHECK (quantity_base > 0),
+    final_cost_per_unit REAL    DEFAULT NULL
+);
+
+CREATE TABLE IF NOT EXISTS purchase_additional_costs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+    cost_name   TEXT    NOT NULL,
+    amount      REAL    NOT NULL CHECK (amount >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS sales (

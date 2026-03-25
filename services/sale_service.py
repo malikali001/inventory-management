@@ -14,6 +14,29 @@ def record_sale(date: str, notes: str, items: List[Dict]) -> int:
     Returns the new sale id.
     """
     conn = get_connection()
+
+    # Aggregate total quantity needed per product (same product may appear in multiple rows)
+    needed: dict[int, float] = {}
+    product_names: dict[int, str] = {}
+    for item in items:
+        qty_base = item["quantity"] * item["conversion_to_base"]
+        pid = item["product_id"]
+        needed[pid] = needed.get(pid, 0) + qty_base
+        product_names[pid] = item["product_name"]
+
+    # Check stock availability before starting the transaction
+    for pid, total_needed in needed.items():
+        row = conn.execute(
+            "SELECT COALESCE(quantity_base, 0) AS stock FROM inventory WHERE product_id = ?",
+            (pid,),
+        ).fetchone()
+        current_stock = row["stock"] if row else 0.0
+        if total_needed > current_stock:
+            raise ValueError(
+                f"Not enough stock for \"{product_names[pid]}\". "
+                f"Available: {current_stock:g}, Required: {total_needed:g}"
+            )
+
     try:
         cur = conn.execute(
             "INSERT INTO sales (date, notes) VALUES (?,?)",
@@ -30,10 +53,19 @@ def record_sale(date: str, notes: str, items: List[Dict]) -> int:
                 (sale_id, item["product_id"], item["unit_id"],
                  item["quantity"], item["price_per_unit"], qty_base),
             )
-            adjust_stock(item["product_id"], -qty_base)
+            try:
+                adjust_stock(item["product_id"], -qty_base)
+            except Exception:
+                conn.rollback()
+                raise ValueError(
+                    f"Not enough stock for \"{item['product_name']}\". "
+                    f"Cannot sell {item['quantity']:g} {item['unit_name']}."
+                )
 
         conn.commit()
         return sale_id
+    except ValueError:
+        raise
     except Exception:
         conn.rollback()
         raise

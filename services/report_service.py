@@ -15,7 +15,7 @@ def get_daily_summary(date_from: str, date_to: str) -> Dict:
     ).fetchone()
 
     cost_row = conn.execute(
-        """SELECT COALESCE(SUM(pi.quantity * pi.price_per_unit), 0) AS total
+        """SELECT COALESCE(SUM(pi.quantity * COALESCE(pi.final_cost_per_unit, pi.price_per_unit)), 0) AS total
            FROM purchase_items pi
            JOIN purchases p ON p.id = pi.purchase_id
            WHERE p.date BETWEEN ? AND ?""",
@@ -58,9 +58,10 @@ def get_profit_per_product(date_from: str, date_to: str) -> List[Dict]:
 
     result = []
     for row in revenue_rows:
-        # Use the most recent purchase price for this product as cost basis
+        # Use the most recent purchase price (final cost if available) as cost basis
         last_purchase = conn.execute(
-            """SELECT pi.price_per_unit, pu.conversion_to_base
+            """SELECT COALESCE(pi.final_cost_per_unit, pi.price_per_unit) AS effective_cost,
+                      pu.conversion_to_base
                FROM purchase_items pi
                JOIN purchases p ON p.id = pi.purchase_id
                JOIN product_units pu ON pu.id = pi.unit_id
@@ -71,7 +72,7 @@ def get_profit_per_product(date_from: str, date_to: str) -> List[Dict]:
         ).fetchone()
 
         if last_purchase:
-            cost_per_base = last_purchase["price_per_unit"] / last_purchase["conversion_to_base"]
+            cost_per_base = last_purchase["effective_cost"] / last_purchase["conversion_to_base"]
             estimated_cost = cost_per_base * row["qty_base_sold"]
         else:
             estimated_cost = 0.0
@@ -113,7 +114,7 @@ def get_low_stock_items() -> List[Dict]:
             "name": row["name"],
             "category": row["category"],
             "quantity_base": row["quantity_base"],
-            "display_qty": round(row["quantity_base"] / conv, 3),
+            "display_qty": round(row["quantity_base"] / conv),
             "display_unit": row["display_unit"] or "unit",
             "low_stock_threshold": row["low_stock_threshold"],
         })
@@ -125,7 +126,7 @@ def get_purchase_history_summary(limit: int = 50) -> List[Dict]:
     rows = conn.execute(
         """SELECT p.id, p.date, p.notes,
                   COUNT(pi.id) AS item_count,
-                  COALESCE(SUM(pi.quantity * pi.price_per_unit), 0) AS total
+                  COALESCE(SUM(pi.quantity * COALESCE(pi.final_cost_per_unit, pi.price_per_unit)), 0) AS total
            FROM purchases p
            LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
            GROUP BY p.id

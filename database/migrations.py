@@ -29,10 +29,26 @@ def _migration_001_baseline(conn: sqlite3.Connection) -> None:
     pass
 
 
+def _migration_002_additional_costs(conn: sqlite3.Connection) -> None:
+    """Add final_cost_per_unit to purchase_items and purchase_additional_costs table."""
+    conn.execute(
+        "ALTER TABLE purchase_items ADD COLUMN final_cost_per_unit REAL DEFAULT NULL"
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS purchase_additional_costs (
+               id          INTEGER PRIMARY KEY AUTOINCREMENT,
+               purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+               cost_name   TEXT    NOT NULL,
+               amount      REAL    NOT NULL CHECK (amount >= 0)
+           )"""
+    )
+
+
 # Register all migrations in order.  The runner applies any whose version
 # number exceeds the current ``schema_version``.
 MIGRATIONS: dict[int, callable] = {
     1: _migration_001_baseline,
+    2: _migration_002_additional_costs,
 }
 
 # ---------------------------------------------------------------------------
